@@ -1,14 +1,20 @@
 flowchart TD
-  Start[Landing Page]
-  SignUpPage[Sign Up Page]
-  SignInPage[Sign In Page]
-  AuthAPI[Authentication API Endpoint]
-  DashboardPage[Dashboard Page]
-  Start -->|Select Sign Up| SignUpPage
-  Start -->|Select Sign In| SignInPage
-  SignUpPage -->|Submit Credentials| AuthAPI
-  SignInPage -->|Submit Credentials| AuthAPI
-  AuthAPI -->|Success| DashboardPage
-  AuthAPI -->|Error| SignUpPage
-  AuthAPI -->|Error| SignInPage
-  DashboardPage -->|Click Logout| Start
+  Start[Start] --> Landing[Landing Page]
+  Landing --> SignIn[Sign In]
+  SignIn --> Auth{Valid Credentials}
+  Auth -->|Yes| Dashboard[Dashboard]
+  Auth -->|No| SignIn
+  Dashboard --> Projects[Projects]
+  Dashboard --> Messages[Messages]
+  Dashboard --> AI[AI Assistant]
+  Dashboard --> Files[File Storage]
+  Dashboard --> AdminAccess{Admin Role}
+  AdminAccess -->|Yes| AdminPanel[Admin Panel]
+  AdminAccess -->|No| Dashboard
+  Projects --> ProjectDetail[Project Detail]
+  ProjectDetail --> Dashboard
+  Messages --> Chat[Chat Conversation]
+  Chat --> Dashboard
+  AI --> Chat
+  Files --> Upload[Upload File]
+  Upload --> Dashboard
