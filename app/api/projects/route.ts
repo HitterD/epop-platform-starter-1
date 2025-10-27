@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { eq, and, desc, ilike, isNull, or } from 'drizzle-orm';
 import { projects, projectMembers, users, tasks } from '@/db/schema';
-import { auth } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 import { z } from 'zod';
 
 const createProjectSchema = z.object({
@@ -17,7 +17,7 @@ const createProjectSchema = z.object({
 // GET /api/projects - Get user's projects
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(request);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
 // POST /api/projects - Create a new project
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(request);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

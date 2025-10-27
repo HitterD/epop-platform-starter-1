@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { eq, and, desc, ilike, isNull } from 'drizzle-orm';
 import { users, fcmTokens, divisions, divisionMembers, auditLogs } from '@/db/schema';
-import { auth } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 import { z } from 'zod';
-import { argon2 } from 'argon2';
+import { hash } from 'argon2';
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -21,33 +21,11 @@ const updateUserSchema = z.object({
   divisionIds: z.array(z.string().uuid()).optional()
 });
 
-// Middleware to check admin access
-async function requireAdmin(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return { error: 'Unauthorized', status: 401 };
-  }
-
-  // Check if user is admin
-  const [user] = await db.select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-
-  if (!user || user.role !== 'ADMIN') {
-    return { error: 'Admin access required', status: 403 };
-  }
-
-  return { session };
-}
 
 // GET /api/admin/users - Get all users (admin only)
 export async function GET(request: NextRequest) {
   try {
-    const adminCheck = await requireAdmin(request);
-    if (adminCheck.error) {
-      return NextResponse.json({ error: adminCheck.error }, { status: adminCheck.status });
-    }
+    const session = await requireAdmin(request);
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search');
@@ -96,7 +74,7 @@ export async function GET(request: NextRequest) {
     const usersWithStats = await Promise.all(
       allUsers.map(async (user) => {
         // Get FCM tokens count
-        const [fcmCount] = await db.select({ count: db.count() })
+        const fcmTokens = await db.select()
           .from(fcmTokens)
           .where(eq(fcmTokens.userId, user.id));
 
@@ -111,7 +89,7 @@ export async function GET(request: NextRequest) {
 
         return {
           ...user,
-          fcmTokensCount: Number(fcmCount.count) || 0,
+          fcmTokensCount: fcmTokens.length,
           divisions: userDivisions
         };
       })
@@ -122,8 +100,16 @@ export async function GET(request: NextRequest) {
       hasMore: allUsers.length === limit
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching users:', error);
+
+    if (error?.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error?.message === "FORBIDDEN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -131,10 +117,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/users - Create new user (admin only)
 export async function POST(request: NextRequest) {
   try {
-    const adminCheck = await requireAdmin(request);
-    if (adminCheck.error) {
-      return NextResponse.json({ error: adminCheck.error }, { status: adminCheck.status });
-    }
+    const session = await requireAdmin(request);
 
     const body = await request.json();
     const validatedData = createUserSchema.parse(body);
@@ -152,7 +135,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Hash password
-    const passwordHash = await argon2.hash(password);
+    const passwordHash = await hash(password);
 
     // Create user
     const [newUser] = await db.insert(users).values({
@@ -176,7 +159,7 @@ export async function POST(request: NextRequest) {
 
     // Log admin action
     await db.insert(auditLogs).values({
-      actorId: adminCheck.session!.user.id,
+      actorId: session.user.id,
       action: 'user.created',
       target: `user:${newUser.id}`,
       metadata: {
@@ -184,17 +167,24 @@ export async function POST(request: NextRequest) {
         name,
         role
       },
-      ipAddress: request.ip || 'unknown',
+      ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
       userAgent: request.headers.get('user-agent') || 'unknown'
     });
 
     return NextResponse.json({ user: newUser }, { status: 201 });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating user:', error);
 
+    if (error?.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error?.message === "FORBIDDEN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Invalid input', details: error.errors }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid input', details: error.issues }, { status: 400 });
     }
 
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

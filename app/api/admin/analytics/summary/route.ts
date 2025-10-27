@@ -2,34 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { eq, and, gte, lte, count, sum } from 'drizzle-orm';
 import { users, messages, conversations, projects, tasks, attachments } from '@/db/schema';
-import { auth } from '@/lib/auth';
-
-// Middleware to check admin access
-async function requireAdmin(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return { error: 'Unauthorized', status: 401 };
-  }
-
-  const [user] = await db.select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-
-  if (!user || user.role !== 'ADMIN') {
-    return { error: 'Admin access required', status: 403 };
-  }
-
-  return { session };
-}
+import { requireAdmin } from '@/lib/auth';
 
 // GET /api/admin/analytics/summary - Get platform analytics summary
 export async function GET(request: NextRequest) {
   try {
-    const adminCheck = await requireAdmin(request);
-    if (adminCheck.error) {
-      return NextResponse.json({ error: adminCheck.error }, { status: adminCheck.status });
-    }
+    const session = await requireAdmin(request);
 
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || '30'; // days
@@ -150,8 +128,16 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ analytics });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching analytics:', error);
+
+    if (error?.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error?.message === "FORBIDDEN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

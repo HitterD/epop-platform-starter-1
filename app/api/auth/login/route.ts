@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Invalid input',
-          details: validation.error.errors.map(e => ({
+          details: validation.error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message,
           })),
@@ -34,8 +34,7 @@ export async function POST(request: NextRequest) {
     const { email, password }: LoginInput = validation.data;
 
     // Get client IP for rate limiting
-    const ipAddress = request.ip ||
-      request.headers.get('x-forwarded-for')?.split(',')[0] ||
+    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0] ||
       request.headers.get('x-real-ip') ||
       'unknown';
 

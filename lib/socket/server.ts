@@ -1,9 +1,15 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
 import { users, conversations, conversationMembers } from '@/db/schema';
+import type {
+  ServerToClientEvents,
+  ClientToServerEvents,
+  InterServerEvents,
+  SocketData
+} from '@/types/realtime';
 
 // Try to import Redis adapter, but don't fail if Redis is not available
 let createAdapter: any;
@@ -17,10 +23,10 @@ try {
   console.warn('Redis adapter not available, running in single instance mode');
 }
 
-import { Socket } from 'socket.io';
+export type TypedIO = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 // Socket.IO types
-interface AuthenticatedSocket extends Socket {
+interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData> {
   userId: string;
   user: {
     id: string;
@@ -30,92 +36,14 @@ interface AuthenticatedSocket extends Socket {
   };
 }
 
-interface ClientToServerEvents {
-  // Join/leave rooms
-  'join:conversation': (conversationId: string) => void;
-  'leave:conversation': (conversationId: string) => void;
-
-  // Messaging
-  'message:send': (data: {
-    conversationId: string;
-    content: any; // TipTap JSON
-    replyToId?: string;
-    attachments?: string[];
-  }) => void;
-  'message:typing:start': (conversationId: string) => void;
-  'message:typing:stop': (conversationId: string) => void;
-
-  // Presence
-  'presence:update': (status: 'online' | 'away' | 'offline') => void;
-
-  // Reactions
-  'message:reaction:add': (data: {
-    messageId: string;
-    emoji: string;
-  }) => void;
-  'message:reaction:remove': (data: {
-    messageId: string;
-    emoji: string;
-  }) => void;
-
-  // Read receipts
-  'conversation:read': (conversationId: string) => void;
-}
-
-interface ServerToClientEvents {
-  // Messaging
-  'message:new': (message: any) => void;
-  'message:updated': (message: any) => void;
-  'message:deleted': (messageId: string) => void;
-
-  // Typing indicators
-  'typing:user': (data: {
-    conversationId: string;
-    userId: string;
-    userName: string;
-    isTyping: boolean;
-  }) => void;
-
-  // Presence
-  'presence:user': (data: {
-    userId: string;
-    status: 'online' | 'away' | 'offline';
-    lastSeen?: string;
-  }) => void;
-
-  // Reactions
-  'message:reaction': (data: {
-    messageId: string;
-    userId: string;
-    emoji: string;
-    action: 'add' | 'remove';
-  }) => void;
-
-  // Read receipts
-  'conversation:read': (data: {
-    conversationId: string;
-    userId: string;
-    lastReadMessageId: string;
-  }) => void;
-
-  // System
-  'error': (error: { message: string; code?: string }) => void;
-  'success': (message: string) => void;
-}
-
-interface SocketData {
-  userId: string;
-  user: any;
-}
-
 class SocketService {
-  private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, SocketData> | null = null;
+  private io: TypedIO | null = null;
   private redisAdapter: any = null;
   private typingTimeouts = new Map<string, NodeJS.Timeout>();
   private userSockets = new Map<string, Set<string>>(); // userId -> Set of socket IDs
 
   async initialize(server: HTTPServer) {
-    this.io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents, SocketData>(server, {
+    this.io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(server, {
       cors: {
         origin: process.env.NODE_ENV === 'production'
           ? process.env.NEXT_PUBLIC_APP_URL
