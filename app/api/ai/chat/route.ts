@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@ai-sdk/openai';
 import { streamText } from 'ai';
-import { auth } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { messages, conversations } from '@/db/schema';
@@ -70,7 +70,7 @@ async function getConversationContext(conversationId?: string, userId?: string) 
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(req);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -120,20 +120,19 @@ export async function POST(req: NextRequest) {
       model: openai('gpt-3.5-turbo'),
       messages: aiMessages,
       temperature: 0.7,
-      maxTokens: 1000,
       onFinish: async (result) => {
         // Log AI usage for analytics
         console.log('AI chat completed:', {
           userId: session.user.id,
           conversationId,
-          promptTokens: result.usage?.promptTokens,
-          completionTokens: result.usage?.completionTokens,
-          totalTokens: result.usage?.totalTokens
+          promptTokens: result.usage?.promptTokens || 0,
+          completionTokens: result.usage?.completionTokens || 0,
+          totalTokens: result.usage?.totalTokens || 0
         });
       }
     });
 
-    return result.toDataStreamResponse();
+    return result.toTextStreamResponse();
 
   } catch (error) {
     console.error('Error in AI chat:', error);

@@ -1,99 +1,143 @@
-# EPOP Platform Security Guidelines
+# EPOP Platform Starter Security Guidelines
 
-This document outlines the security best practices and controls for the Enterprise Platform for Operational Performance (EPOP). By following these guidelines, you ensure the application is designed, developed, and deployed with security at its core.
+## 1. Overview and Scope
+This document outlines the security best practices, controls, and configurations for the EPOP Platform Starter—a full-stack Next.js 15 boilerplate with TypeScript, Drizzle ORM, Socket.IO, Redis, MinIO, Vercel AI SDK, shadcn/ui, and Tailwind CSS. It applies to all phases of development, testing, and production deployment.
 
-## 1. Authentication & Access Control
+Key goals:
+- Embed security by design and defense in depth.
+- Enforce least privilege across users, services, and data.
+- Protect confidentiality, integrity, and availability of user and system data.
 
-### 1.1 Robust Authentication
-- Use **JWTs** for access and refresh tokens. Do not accept `alg: none`. Validate signatures, `exp`, `aud`, and `iss` claims.
-- Store **access tokens** in memory or a secure HTTP-only cookie with `SameSite=Strict`; store **refresh tokens** in an HTTP-only, `Secure`, `SameSite=Strict` cookie.
-- Enforce strong **password policies** (minimum 12 characters, complexity rules) and hash passwords with **Argon2** or **bcrypt** using unique salts.
-- Implement **Multi-Factor Authentication (MFA)** for ADMIN and high-privilege users.
+## 2. Core Security Principles
+1. **Security by Design**: Integrate threat modeling and secure coding from day one.
+2. **Least Privilege**: Grant minimal roles/permissions (DB user, AWS/MinIO credentials, Redis ACLs).
+3. **Defense in Depth**: Combine network, application, and data layer protections.
+4. **Input Validation & Output Encoding**: Use Zod schemas and context-aware escaping.
+5. **Fail Securely**: Default to safe failure modes, hide stack traces and internal errors.
+6. **Secure Defaults**: Ship with restrictive CORS, CSP, cookie flags, and TLS only.
 
-### 1.2 Session Management
-- Rotate refresh tokens on use and maintain a revocation list.
-- Enforce **idle** and **absolute** session timeouts.
-- Provide a secure logout endpoint that invalidates tokens server-side.
-- Defend against **session fixation** by regenerating session identifiers on privilege changes.
+## 3. Authentication & Access Control
+### 3.1 Strong Password Policies
+- Enforce minimum length (≥ 12 characters), complexity classes, and rotation as needed.
+- Hash passwords with Argon2 or bcrypt + unique salts (via Better Auth internals).
 
-### 1.3 Role-Based Access Control (RBAC)
-- Define roles (e.g., `ADMIN`, `USER`) and assign minimal permissions.
-- Perform server-side authorization checks on every protected route and API endpoint.
-- Centralize permission logic in a middleware or service layer to avoid duplication.
+### 3.2 JWT & Session Management
+- Use `HS256` or `RS256` only; disallow the `none` algorithm.
+- Validate `exp`, `iat`, and `aud` claims on every request.
+- Store refresh tokens in `HttpOnly`, `Secure`, `SameSite=Strict` cookies.
+- Implement idle (e.g., 15 min) and absolute session timeouts.
+- On logout or password change, revoke tokens (rotate signing key or keep revocation list).
 
-## 2. Input Handling & Validation
+### 3.3 Multi-Factor Authentication (MFA)
+- Optional MFA via TOTP or SMS for high-privilege accounts (admin panel).
 
-- Treat all incoming data (API, WebSocket messages, file metadata) as untrusted.
-- Validate and sanitize inputs using **Zod** schemas at every API route and Socket.IO handler.
-- Use **parameterized queries** or **Drizzle ORM** to prevent SQL injection.
-- Encode all user-supplied output in HTML contexts using a library like **DOMPurify** to mitigate XSS.
-- Reject unvalidated redirects or forwards; maintain an allow-list of safe URLs.
+### 3.4 Role-Based Access Control (RBAC)
+- Define roles (e.g., `user`, `moderator`, `admin`) and map permissions in code.
+- Enforce authorization server-side on every API and page route via `auth-middleware.ts`.
 
-## 3. Real-Time Communication Security
+## 4. Input Handling & Injection Prevention
+- Use Zod for all API inputs; reject or sanitize any unexpected fields.
+- Access the database only through Drizzle ORM’s parameterized queries.
+- Never interpolate user data into raw SQL or shell commands.
+- Sanitize and encode user-supplied HTML/markdown for UI rendering.
+- Validate redirect URLs against a safe-list to prevent open redirect.
 
-- Serve **Socket.IO** connections only over **WSS** with TLS 1.2+.
-- Authenticate WebSocket connections by validating JWTs in the connection handshake.
-- Use the **Redis adapter** with ACLs to isolate pub/sub channels per tenant or conversation.
-- Rate-limit message events per client to prevent flooding and DoS.
+## 5. Cross-Site Scripting (XSS) & Content Security Policy (CSP)
+- Apply context-aware encoding for data injected into JSX.
+- Enable a strict CSP header:
+  ```
+  Content-Security-Policy: default-src 'self';
+    script-src 'self' 'nonce-{{nonce}}';
+    style-src 'self' 'nonce-{{nonce}}' https://cdn.jsdelivr.net;
+    img-src 'self' data: https://*.minio.example.com;
+    connect-src 'self' https://api.example.com wss://socket.example.com;
+  ```
+- Use Subresource Integrity (SRI) for CDN scripts.
 
-## 4. File Storage & Upload Security
+## 6. CSRF Protection
+- Implement anti-CSRF tokens (synchronizer token pattern) on all state-changing forms and API routes.
+- For JSON APIs using cookies, require a custom header (e.g., `X-CSRF-Token`) with each POST/PUT/DELETE.
 
-- Validate file types, extensions, and sizes on the server before issuing **MinIO** presigned URLs.
-- Store uploaded files **outside the webroot** and serve them via secured presigned URLs only.
-- Scan uploaded content for malware (e.g., using ClamAV) before accepting references in messages.
-- Enforce least-privilege on MinIO credentials (e.g., a read-only user for downloads).
-- Prevent **path traversal** by normalizing and validating object keys.
+## 7. API & Service Security
+- Enforce HTTPS with TLS 1.2+; redirect HTTP → HTTPS at edge.
+- Restrict CORS to trusted origins:
+  ```js
+  origin: ['https://app.example.com'],
+  methods: ['GET','POST','PUT','DELETE'],
+  credentials: true
+  ```
+- Rate-limit per IP and per user (e.g., 100 requests/minute) using Redis or a gateway.
+- Version all public APIs (e.g., `/api/v1/...`).
+- Return minimal data: avoid exposing internal IDs, stack traces, or PII.
 
-## 5. Data Protection & Privacy
+## 8. Data Protection & Privacy
+### 8.1 Encryption
+- Encrypt all in-transit traffic with TLS 1.2+.
+- At rest:
+  - Enable PostgreSQL TDE or disk-level encryption.
+  - Encrypt backups.
 
-- Encrypt all traffic with **HTTPS** (TLS 1.2+) and enable **HSTS**.
-- Encrypt sensitive data at rest in PostgreSQL (e.g., PII) using **column-level encryption** if needed.
-- Never log or expose PII (emails, JWTs, refresh tokens). Mask or redact sensitive fields in logs.
-- Use a secrets manager (e.g., **AWS Secrets Manager**, **Vault**) for database credentials, JWT secrets, and third-party API keys.
-- Follow applicable data privacy regulations (GDPR, CCPA) for user data handling and consent.
+### 8.2 Secrets Management
+- Do **not** commit `.env` or credentials.
+- Use a vault (HashiCorp, AWS Secrets Manager, etc.) for DB passwords, JWT keys, MinIO creds.
+- Rotate secrets periodically and on suspected compromise.
 
-## 6. API & Service Security
+### 8.3 PII Handling
+- Mask or hash PII in logs (e.g., emails, IPs).
+- Purge or anonymize old user data per GDPR/CCPA.
 
-- Enforce strict **CORS** policies: allow only trusted origins for browser-based API calls.
-- Apply **rate limiting** and **IP throttling** on authentication and messaging endpoints.
-- Version your API (e.g., `/api/v1/...`) and maintain backward compatibility carefully.
-- Use appropriate HTTP methods (GET, POST, PUT, DELETE) and status codes.
-- Sanitize JSON and form-encoded payloads; reject additional unexpected properties.
+## 9. File Uploads & MinIO
+- Enforce server-side validation on file type (MIME), extension whitelist, and size limits.
+- Store outside webroot; serve files via signed URLs that expire (e.g., 5 minutes).
+- Scan uploads for malware at ingest.
+- Use MinIO’s bucket policies to restrict public access.
 
-## 7. Web Application Security Hygiene
+## 10. Real-time Communication Security
+- Authenticate socket connections using signed JWTs on handshake.
+- Authorize event channels by user role and context.
+- Use Redis ACLs to restrict pub/sub operations.
+- Limit message size and rate to prevent flooding.
 
-- Implement anti-CSRF tokens on all state-changing HTTP endpoints (e.g., using **Double Submit Cookie** or **Synchronizer Token**).
-- Configure security headers globally via middleware:
-  - `Content-Security-Policy` (restrict scripts, styles)
-  - `X-Frame-Options: DENY`
-  - `X-Content-Type-Options: nosniff`
-  - `Referrer-Policy: strict-origin-when-cross-origin`
-- Mark all session cookies as `HttpOnly`, `Secure`, and `SameSite=Strict`.
-- Avoid storing tokens or sensitive data in `localStorage` or `sessionStorage`.
-- Use **Subresource Integrity (SRI)** when loading third-party scripts.
+## 11. Admin Panel & Privileged Operations
+- Enforce RBAC middleware on every admin API and page.
+- Log all actions (user creation, role changes, configuration edits) with an audit trail.
+- Out-of-band notifications for critical changes (e.g., admin account created).
 
-## 8. Infrastructure & Configuration Management
+## 12. Infrastructure & Deployment
+- **Docker**:
+  - Build images with non-root user.
+  - Scan images for vulnerabilities.
+- **Server Hardening**:
+  - Disable unused ports/services.
+  - Enforce firewall rules (DB only accessible from app servers).
+- **TLS Configuration**:
+  - Use strong ciphers (AES GCM, ECDHE).
+  - HSTS with `max-age=31536000; includeSubDomains; preload`.
+- **Logging & Monitoring**:
+  - Centralize logs (ELK/Splunk).
+  - Monitor failed logins, 4xx/5xx spikes, unusual socket events.
+  - Alert on suspicious activity.
 
-- Harden servers: disable unused services, close non-essential ports, and disable directory listings.
-- Regularly patch OS, database, and library dependencies.
-- Disable debug and verbose error output in production; return generic error messages to clients.
-- Use Infrastructure-as-Code (IaC) to enforce consistent, secure configurations across environments.
-- Manage environment variables securely and provide a `.env.example` without secrets.
+## 13. Dependency Management
+- Maintain `package-lock.json` for deterministic installs.
+- Regularly run SCA (e.g., npm audit, Snyk) on dependencies and transitive libs.
+- Update critical/security patches within 24 hours of release.
+- Remove unused packages to reduce attack surface.
 
-## 9. Dependency Management
+## 14. Testing & Continuous Integration
+- Unit tests for utilities, Zod schemas, and auth logic.
+- Integration tests for API routes with a test database.
+- E2E tests for key user flows (registration, login, file upload, chat).
+- Include security tests:
+  - SQL injection payloads.
+  - XSS scanners.
+  - CSRF token validation.
+- Fail builds on high‐severity vulnerabilities.
 
-- Maintain a lockfile (`package-lock.json`) and perform routine **SCA scans** for vulnerabilities.
-- Adopt only actively maintained libraries with a strong security track record.
-- Minimize third-party dependencies to reduce the attack surface.
-- Apply security updates promptly; monitor CVEs for critical fixes.
-
-## 10. Monitoring, Logging & Incident Response
-
-- Implement **structured logging** (e.g., Pino) with correlation IDs per request and WebSocket message.
-- Monitor anomalies such as repeated failed logins, high message rates, or unusual file uploads.
-- Enforce alerting for critical events (e.g., token validation failures, suspicious IP access).
-- Document an incident response plan, including token revocation and user notification procedures.
+## 15. Continuous Improvement
+- Conduct periodic penetration tests and code reviews.
+- Update this guideline with emerging threats and best practices.
+- Engage in bug bounty or responsible disclosure programs.
 
 ---
-
-By adhering to these security guidelines, the EPOP platform will achieve a robust, defense-in-depth posture, ensuring confidentiality, integrity, and availability of user data and services.
+Adhering to these guidelines will help ensure the EPOP Platform Starter remains secure, maintainable, and compliant with industry standards. Regularly revisit and update controls as the codebase and threat landscape evolve.

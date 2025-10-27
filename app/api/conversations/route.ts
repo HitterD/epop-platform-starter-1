@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { eq, and, desc, ilike } from 'drizzle-orm';
+import { eq, and, desc, ilike, sql } from 'drizzle-orm';
 import { conversations, conversationMembers, users } from '@/db/schema';
-import { auth } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 import { z } from 'zod';
 
 const createConversationSchema = z.object({
@@ -15,7 +15,7 @@ const createConversationSchema = z.object({
 // GET /api/conversations - Get user's conversations
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(request);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -34,29 +34,28 @@ export async function GET(request: NextRequest) {
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
-        memberCount: db.count().as('member_count')
+        memberCount: sql<number>`count(${conversationMembers.userId})`.as('member_count')
       })
       .from(conversations)
       .innerJoin(
         conversationMembers,
         eq(conversations.id, conversationMembers.conversationId)
       )
-      .where(and(
-        eq(conversationMembers.userId, session.user.id),
-        eq(conversationMembers.hasLeft, false)
-      ))
       .orderBy(desc(conversations.lastMessageAt))
       .limit(limit)
       .offset(offset);
 
     // Add search filter
+    const conditions = [
+      eq(conversationMembers.userId, session.user.id),
+      eq(conversationMembers.hasLeft, false)
+    ];
+
     if (search) {
-      query = query.where(and(
-        eq(conversationMembers.userId, session.user.id),
-        eq(conversationMembers.hasLeft, false),
-        ilike(conversations.title, `%${search}%`)
-      ));
+      conditions.push(ilike(conversations.title, `%${search}%`));
     }
+
+    query = query.where(and(...conditions));
 
     const userConversations = await query;
 
@@ -74,7 +73,7 @@ export async function GET(request: NextRequest) {
 // POST /api/conversations - Create a new conversation
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(request);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -101,7 +100,7 @@ export async function POST(request: NextRequest) {
           eq(conversationMembers.userId, allMemberIds[0])
         ))
         .groupBy(conversations.id)
-        .having(db.count().eq(2)); // DM should have exactly 2 members
+        .having(sql`count(*) = 2`); // DM should have exactly 2 members
 
       if (existingDM.length > 0) {
         return NextResponse.json({
@@ -137,7 +136,7 @@ export async function POST(request: NextRequest) {
     console.error('Error creating conversation:', error);
 
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Invalid input', details: error.errors }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid input', details: error.issues }, { status: 400 });
     }
 
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

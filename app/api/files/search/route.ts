@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { minioService } from '@/lib/storage/minio-client';
-import { auth } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/auth';
 
 // GET /api/files/search - Search files
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
+    const session = await getSessionFromRequest(request);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

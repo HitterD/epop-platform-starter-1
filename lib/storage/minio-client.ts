@@ -1,7 +1,7 @@
-import * as Minio from 'minio';
+import { Client, type ClientOptions } from 'minio';
 import { db } from '@/lib/db';
 import { attachments } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 
 export interface FileUploadOptions {
@@ -35,7 +35,7 @@ export interface FileMetadata {
 }
 
 class MinioService {
-  private client: Minio.Client | null = null;
+  private client: Client | null = null;
   private defaultBucket = 'epop-files';
   private isInitialized = false;
 
@@ -53,7 +53,7 @@ class MinioService {
         throw new Error('MinIO access key and secret key are required');
       }
 
-      this.client = new Minio.Client({
+      this.client = new Client({
         endPoint,
         port,
         useSSL,
@@ -285,7 +285,7 @@ class MinioService {
     }
   }
 
-  async getFileInfo(fileId: string): Promise<any> {
+  async getFileInfo(fileId: string): Promise<typeof attachments.$inferSelect | null> {
     try {
       const [attachment] = await db.select()
         .from(attachments)
@@ -303,7 +303,7 @@ class MinioService {
     }
   }
 
-  async searchFiles(query: string, userId?: string): Promise<any[]> {
+  async searchFiles(query: string, userId?: string): Promise<typeof attachments.$inferSelect[]> {
     try {
       let dbQuery = db.select({
         id: attachments.id,
@@ -321,7 +321,7 @@ class MinioService {
         dbQuery = dbQuery.where(
           // In a real implementation, you'd use full-text search
           // For now, we'll use a simple LIKE query
-          eq(attachments.originalName, `%${query}%`)
+          like(attachments.originalName, `%${query}%`)
         );
       }
 
@@ -339,7 +339,7 @@ class MinioService {
     }
   }
 
-  async getFilesByMessage(messageId: string): Promise<any[]> {
+  async getFilesByMessage(messageId: string): Promise<typeof attachments.$inferSelect[]> {
     try {
       const files = await db.select()
         .from(attachments)
@@ -353,7 +353,7 @@ class MinioService {
     }
   }
 
-  async getFilesByProject(projectId: string): Promise<any[]> {
+  async getFilesByProject(projectId: string): Promise<typeof attachments.$inferSelect[]> {
     try {
       const files = await db.select()
         .from(attachments)

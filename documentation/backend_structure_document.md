@@ -1,227 +1,204 @@
 # Backend Structure Document
 
-## Backend Architecture
+This document outlines the backend architecture, database setup, APIs, hosting, infrastructure, security, and maintenance strategies for the EPOP Platform Starter. It’s written in everyday language so anyone can understand how the backend works.
 
-We use a **unified, full-stack** approach centered on Next.js 15’s App Router. This means the same codebase serves both the frontend and backend API routes. Key design choices include:
+## 1. Backend Architecture
 
-- **Next.js API Routes**: We organize business logic under `/app/api/` with RESTful endpoints. This keeps frontend and backend in one place, simplifying deployment and sharing TypeScript types.  
-- **Socket.IO Server**: A separate Node.js process handles real-time features (messaging, presence, typing indicators). It connects to Redis for scalable pub/sub.  
-- **Repository/Service Pattern**: Database operations are wrapped in service or repository layers. This isolates Drizzle ORM details, making handlers easier to maintain and test.  
+We chose a modern, modular monolith approach using Next.js 15’s App Router. This means frontend pages, server-side logic, and APIs live in one codebase but remain clearly separated by folders and responsibilities.
 
-This setup supports:
+- **Framework & Paradigm**
+  - Next.js 15 (App Router) for server rendering, routing, and API routes in one project.
+  - TypeScript everywhere to catch errors early and maintain a consistent, self-documenting code style.
+- **Design Patterns**
+  - **Modular Monolith**: Each feature (authentication, chat, file storage) has its own directory and services.
+  - **Context API** for sharing global state (e.g., user session, Socket.IO connection) across components without prop-drilling.
+  - **Service Layer** (`/lib`) to encapsulate business logic (auth, email, storage, real-time messaging).
+- **Scalability & Performance**
+  - Real-time events powered by Socket.IO and Redis adapter, allowing horizontal scaling of WebSocket servers.
+  - Database interactions via Drizzle ORM with connection pooling, optimized queries, and type-safe migrations.
+  - Server Components for data fetching where possible, reducing client-side JavaScript and improving initial load.
 
-- **Scalability**: API routes scale on-demand via serverless or container instances; Socket.IO scales horizontally with Redis as its adapter.  
-- **Maintainability**: Clear separation of concerns—routing, services, data—keeps code organized and testable.  
-- **Performance**: Real-time communications offload long-polling; caching (Redis) speeds up frequent reads.
+## 2. Database Management
 
-## Database Management
+The project uses a relational database with strict typing and migration support.
 
-We chose **PostgreSQL** for its reliability, ACID guarantees, and built-in full-text search. We manage the database with:
+- **Type**: SQL (Relational)
+- **System**: PostgreSQL
+- **ORM**: Drizzle ORM
+- **Data Practices**
+  - Schemas defined in TypeScript (in `/db/schema`), ensuring the database structure matches code types.
+  - Migrations managed by Drizzle to keep production and development schemas in sync.
+  - Zod validation at the API layer to verify incoming data before touching the database.
+  - Connection pooling for efficient, scalable database access.
 
-- **Drizzle ORM**: Type-safe query builder and schema definitions in TypeScript.  
-- **drizzle-kit**: Migration tool that tracks schema changes and applies them in a versioned way across environments.  
-- **Connection Pooling**: We use a pooled client (e.g., `pg.Pool`) to efficiently reuse database connections and prevent saturation under load.  
+## 3. Database Schema
 
-**Data Access Practices**:
+Below is a human-friendly overview followed by SQL definitions for the main tables.
 
-- All queries go through the repository layer—no raw SQL in controllers.  
-- Zod schema validation at the API boundary ensures only well-formed data reaches the database.  
-- Transactions group related operations (e.g., creating a message and queuing a notification) to maintain consistency.
+### 3.1 Overview (Human-Readable)
 
-## Database Schema
+- **Users**: Stores user accounts and credentials.
+- **Roles**: Defines roles like `user` or `admin`.
+- **User_Roles**: Links users to their roles (many-to-many).
+- **Sessions**: Holds refresh tokens and expiration for JWT-based sessions.
+- **Chat_Rooms**: Tracks chat rooms or channels.
+- **Messages**: Records individual chat messages with sender and room info.
+- **Files**: Metadata for uploaded files (owner, name, URL, size, timestamps).
 
-Below is a human-friendly description of our main tables, followed by SQL definitions for PostgreSQL.
+### 3.2 SQL Schema (PostgreSQL)
 
-Tables and Relationships:
-
-- **users**: Stores user credentials and profile info. Each user has one **role**.  
-- **roles**: Defines permission levels (`ADMIN`, `USER`).  
-- **divisions**: Organizational units; users can belong to one or more divisions.  
-- **projects**: High-level containers with multiple tasks and members.  
-- **tasks**: Belong to a project; track status, assignees, and deadlines.  
-- **conversations**: Group or direct message threads; each links to multiple messages.  
-- **messages**: Rich-text content tied to a conversation; may reference file attachments.  
-- **attachments**: Metadata about files stored in MinIO, linked to messages.
-
-PostgreSQL Schema (simplified):
-```
--- roles
-CREATE TABLE roles (
-  id SERIAL PRIMARY KEY,
-  name TEXT UNIQUE NOT NULL
-);
-
--- users
+```sql
+-- 1. Users table
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role_id INTEGER NOT NULL REFERENCES roles(id),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  name TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- divisions
-CREATE TABLE divisions (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL
+-- 2. Roles table
+CREATE TABLE roles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT UNIQUE NOT NULL
 );
 
--- user_divisions (many-to-many)
-CREATE TABLE user_divisions (
-  user_id UUID REFERENCES users(id),
-  division_id INTEGER REFERENCES divisions(id),
-  PRIMARY KEY (user_id, division_id)
+-- 3. User_Roles join table
+CREATE TABLE user_roles (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role_id)
 );
 
--- projects
-CREATE TABLE projects (
+-- 4. Sessions table (for refresh tokens)
+CREATE TABLE sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+-- 5. Chat_Rooms table
+CREATE TABLE chat_rooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  description TEXT,
-  owner_id UUID REFERENCES users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- project_members
-CREATE TABLE project_members (
-  project_id UUID REFERENCES projects(id),
-  user_id UUID REFERENCES users(id),
-  role TEXT NOT NULL,
-  PRIMARY KEY (project_id, user_id)
-);
-
--- tasks
-CREATE TABLE tasks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id),
-  title TEXT NOT NULL,
-  description TEXT,
-  status TEXT NOT NULL,
-  assignee_id UUID REFERENCES users(id),
-  due_date DATE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
--- conversations
-CREATE TABLE conversations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  title TEXT,
-  is_group BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
--- conversation_members
-CREATE TABLE conversation_members (
-  conversation_id UUID REFERENCES conversations(id),
-  user_id UUID REFERENCES users(id),
-  PRIMARY KEY (conversation_id, user_id)
-);
-
--- messages
+-- 6. Messages table
 CREATE TABLE messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  conversation_id UUID REFERENCES conversations(id),
-  sender_id UUID REFERENCES users(id),
-  content JSONB NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  room_id UUID NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  sent_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- attachments
-CREATE TABLE attachments (
+-- 7. Files table
+CREATE TABLE files (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  message_id UUID REFERENCES messages(id),
-  key TEXT NOT NULL,
-  bucket TEXT NOT NULL,
-  size BIGINT NOT NULL,
-  content_type TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  url TEXT NOT NULL,
+  size_bytes BIGINT,
+  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
-```
+```  
 
-## API Design and Endpoints
+## 4. API Design and Endpoints
 
-We follow a **RESTful** style, grouping routes by resource under `/api`. All endpoints validate input with Zod and return consistent status codes. Key routes:
+The backend offers RESTful API routes under `/app/api`. Here are the key endpoints and their roles:
 
-- **/api/auth/**
-  - `POST /login` – Email/password login, returns access/refresh tokens.  
-  - `POST /refresh` – Rotates refresh token in a secure cookie, returns new access token.  
-  - `POST /logout` – Clears refresh cookie.  
-  - `POST /password-reset` – Initiates email flow; `POST /password-reset/confirm` sets new password.
+### 4.1 Authentication
+- **POST /api/auth/register**: Create a new user with email and password.
+- **POST /api/auth/login**: Verify credentials, issue access token and refresh token cookie.
+- **POST /api/auth/refresh**: Rotate refresh token, return a new access token.
+- **POST /api/auth/logout**: Clear the refresh token, end session.
+- **POST /api/auth/password-reset**: Send reset link and update password.
 
-- **/api/projects/**
-  - `GET /` – List projects for the user.  
-  - `POST /` – Create a new project.  
-  - `GET /:id` – Fetch project details.  
-  - `PUT /:id` – Update project.  
-  - `DELETE /:id` – Remove project.
+### 4.2 Users & Admin
+- **GET /api/users/me**: Fetch details of the logged-in user.
+- **GET /api/users/:id**: (Admin) View any user’s profile.
+- **GET /api/admin/users**: (Admin) List all users with roles.
+- **PATCH /api/admin/users/:id**: (Admin) Update roles or deactivate accounts.
 
-- **/api/tasks/**
-  - `GET /?projectId=` – List tasks in a project.  
-  - `POST /` – Create a task.  
-  - `PUT /:id` – Update status, assignee, etc.
+### 4.3 Real-Time Chat (Socket.IO)
+- **WebSocket /api/socket**:  
+  - `join-room`: Subscribe to a chat room.
+  - `leave-room`: Unsubscribe when exiting.
+  - `send-message`: Broadcast message to room, persist in DB.
+  - `typing` / `stop-typing`: Notify others.
 
-- **/api/conversations/**
-  - `GET /` – List user’s conversations.  
-  - `POST /` – Create new conversation (direct or group).  
-  - `GET /:id/messages` – Fetch messages with pagination.  
-  - `POST /:id/messages` – Send a message with rich-text content.
+### 4.4 AI Integration
+- **POST /api/ai/chat**: Forward user prompt to the Vercel AI SDK, stream AI responses back.
 
-- **/api/files/**
-  - `GET /presign-upload` – Returns presigned URL for MinIO uploads.  
-  - `GET /presign-download` – Returns presigned URL for safe downloads.
+### 4.5 File Storage
+- **POST /api/files/upload**: Handle multipart/form-data upload, store in MinIO, record metadata in `files` table.
+- **GET /api/files/:id/download**: Generate a signed URL or stream file from MinIO.
 
-- **/api/ai/**
-  - `POST /chat` – Streams conversational AI responses.
+### 4.6 Miscellaneous
+- **GET /api/health**: Simple health check for uptime monitoring.
 
-- **/api/admin/** (ADMIN role only)
-  - `GET /users`, `POST /users`, `PUT /users/:id`, `DELETE /users/:id` – Manage users and roles.
+## 5. Hosting Solutions
 
-## Hosting Solutions
+The backend runs in a containerized environment, and we recommend a hybrid of managed and self-hosted services:
 
-We recommend deploying the backend on **AWS** using managed services:
+- **Next.js App**
+  - Host on Vercel for auto-scaling, global CDN, and zero-config deployments.
+  - Alternatively, containerize with Docker and deploy on AWS ECS, Google Cloud Run, or Kubernetes.
+- **PostgreSQL**
+  - Managed service like AWS RDS or Google Cloud SQL for automated backups, scaling, and maintenance.
+- **Redis**
+  - Managed Redis (e.g., AWS ElastiCache) for the Socket.IO adapter and caching layers.
+- **MinIO**
+  - Self-host on Kubernetes or Docker, or use a managed S3-compatible service.
 
-- **Next.js & API Routes**: Vercel or AWS App Runner – automatic scaling, global CDN for static assets.  
-- **Socket.IO Server**: AWS ECS Fargate behind an Application Load Balancer with sticky sessions or AWS GameLift for low-latency websockets.  
-- **PostgreSQL**: Amazon RDS (db.t3.medium or above) with Multi-AZ for failover.  
-- **Redis**: Amazon ElastiCache (Redis) cluster for Pub/Sub and job queuing.  
-- **MinIO**: Self-hosted on EC2 (distributed) or use S3 with IAM policies as an alternative.  
+## 6. Infrastructure Components
 
-Benefits:
+- **Load Balancer**
+  - Built into Vercel or via AWS Application Load Balancer when self-hosting.
+- **Caching**
+  - Redis for real-time event coordination, session caching, and potential API response caching.
+- **Content Delivery Network (CDN)**
+  - Vercel’s global CDN or Cloudflare in front of the Next.js app and static assets.
+- **Object Storage**
+  - MinIO or S3 for file uploads, behind proper access controls.
+- **CI/CD**
+  - GitHub Actions or Vercel’s Git integration to run linting, tests, and deploy on merge to main.
 
-- **Reliability**: Managed failover for RDS and Redis clusters.  
-- **Scalability**: Serverless or container-based horizontal scaling.  
-- **Cost-effectiveness**: Pay-as-you-go billing; reserve instances for constant loads.
+## 7. Security Measures
 
-## Infrastructure Components
+- **Authentication & Authorization**
+  - Better Auth with JWT access tokens and HTTP-only cookies for refresh tokens.
+  - Role-Based Access Control (RBAC) to guard admin routes.
+- **Data Encryption**
+  - TLS/HTTPS for all client-server traffic.
+  - Encryption at rest provided by managed DB and S3 services.
+- **Input Validation**
+  - Zod schemas on every API route to reject invalid or malicious payloads.
+- **CSRF Protection**
+  - Double-submit cookie pattern or CSRF tokens for all state-changing requests.
+- **Rate Limiting**
+  - Per-user or per-IP limits via Redis to prevent abuse.
+- **Environment Isolation**
+  - Secrets and keys stored in environment variables or secret managers (e.g., AWS Secrets Manager).
 
-- **Load Balancer**: Distributes traffic to Next.js instances and Socket.IO servers.  
-- **Redis Caching & Pub/Sub**: Speeds up frequent reads (e.g., session lookups) and powers Socket.IO’s adapter.  
-- **CDN**: Vercel’s CDN or CloudFront delivers static assets and Next.js pages close to users.  
-- **Job Queue**: BullMQ on top of Redis handles background tasks (emails, push notifications, reminders).  
-- **Object Storage**: MinIO or S3 stores user uploads; presigned URLs let clients upload/download directly, reducing server load.
+## 8. Monitoring and Maintenance
 
-## Security Measures
+- **Logging & Error Tracking**
+  - Centralized logs via a service like Datadog, Logflare, or AWS CloudWatch.
+  - Error monitoring with Sentry to capture exceptions and performance issues.
+- **Health Checks**
+  - `/api/health` endpoint monitored by uptime services (e.g., Pingdom, UptimeRobot).
+- **Metrics & Alerts**
+  - Prometheus + Grafana for custom metrics (DB connections, Redis usage, request latencies).
+  - Alerts on high error rates, slow responses, or resource exhaustion.
+- **Scheduled Maintenance**
+  - Regular dependency updates via automated tooling (Dependabot).
+  - Database vacuuming and index maintenance on a weekly basis.
+  - Review and rotate keys and certificates every 90 days.
 
-- **Authentication & Authorization**:
-  - JWT access tokens (short-lived) in memory or Authorization header.  
-  - Refresh tokens in secure, HTTP-only cookies to mitigate XSS risks.  
-  - Role-based checks in middleware for protected and admin routes.  
-- **Data Encryption**:
-  - TLS everywhere: API endpoints, database connections, MinIO/S3.  
-  - Encrypt sensitive fields at rest if required by policy.  
-- **Input Validation**: Zod schemas on every route guard against malformed data and injection attacks.  
-- **Rate Limiting**: Apply IP-based limits on auth and messaging endpoints to prevent abuse.  
-- **Security Headers**: CSP, HSTS, X-Frame-Options, and others via middleware.
+## 9. Conclusion and Overall Backend Summary
 
-## Monitoring and Maintenance
-
-- **Logging**: Pino for structured logs. Forward logs to a central service (e.g., Datadog, ELK) with request IDs for traceability.  
-- **Error Tracking**: Sentry or LogRocket captures exceptions in runtime and frontend.  
-- **Performance Metrics**: CloudWatch or Prometheus collects CPU, memory, Redis hit rates, RPS.  
-- **Health Checks**: Periodic HTTP endpoints for load balancer health checks.  
-- **Database Migrations**: `drizzle-kit` runs migrations at deploy time to keep schema in sync.  
-- **Dependency Updates**: Automated tooling (Dependabot) flags outdated packages; regular patch releases.
-
-## Conclusion and Overall Backend Summary
-
-Our backend is built around a **Next.js-centric** monorepo using TypeScript, Drizzle ORM, and PostgreSQL. We layer real-time messaging with Socket.IO and Redis, secure file transfers via MinIO, and AI assistance via Vercel’s AI SDK. Deployment on AWS (or Vercel for serverless functions) ensures global reach, high availability, and cost control. Thorough security, monitoring, and maintenance practices keep the system reliable, while the repository/service pattern and type-safe tooling guarantee long-term maintainability. This backend structure meets EPOP’s needs for performance, scalability, and an integrated developer experience.
+The EPOP Platform Starter backend is a scalable, maintainable, and performance-oriented foundation built with Next.js 15, PostgreSQL, Drizzle ORM, Socket.IO, and more. Its modular monolith structure keeps code clear, while TypeScript and Zod enforce type safety and data validity. Real-time features, AI integration, and secure file handling are seamlessly woven together, all deployable via containers or Vercel. Together, these components deliver a robust backend that aligns with modern web app needs and ensures a great developer and user experience.

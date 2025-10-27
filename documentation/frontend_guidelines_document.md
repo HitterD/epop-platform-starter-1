@@ -1,161 +1,169 @@
 # Frontend Guidelines Document
 
-This document outlines the structure, design principles, and technologies for the EPOP frontend. It’s written in everyday language so everyone on the team can understand how we build, style, and maintain our application.
+This document outlines the frontend architecture, design principles, technologies, and best practices used in the EPOP Platform Starter. It’s written in everyday language to ensure everyone—regardless of technical background—can understand how the frontend is structured and why certain choices were made.
+
+---
 
 ## 1. Frontend Architecture
 
-**Core Frameworks and Libraries**
-- **Next.js 15 (App Router)**: Powers both pages and API routes. File-based routing and nested layouts make organization easy.
-- **React 19 + TypeScript**: Provides a component-driven approach with full type safety, reducing runtime errors.
-- **Tailwind CSS + shadcn/ui**: A utility-first styling system plus a set of ready-made, accessible components (dialogs, tables, inputs, calendar).
-- **Drizzle ORM + PostgreSQL**: On the backend side (via Next.js API routes), Drizzle gives type-safe database access and migrations.
-- **Socket.IO + Redis adapter**: Enables scalable real-time messaging.
-- **MinIO client**: Handles presigned URL generation for secure uploads/downloads.
-- **Vercel `@ai-sdk` & `assistant-ui`**: Integrates AI features like message summarization and draft generation.
-- **BullMQ (Redis queue)**: Manages background tasks (emails, push notifications, reminders).
-- **Zod**: Validates API inputs at every endpoint.
+### Overview
+- **Framework:** Next.js 15 with the App Router, handling both pages and API routes in one codebase.  
+- **Language:** TypeScript for type safety from UI to data layer.  
+- **UI Library:** shadcn/ui built on React Server Components and React Client Components.  
+- **Styling:** Tailwind CSS with a utility-first approach.  
+- **Theming:** `next-themes` for light/dark mode support.  
+- **State Management:** React Context API for authentication and real-time data (Socket.IO).  
 
-**Scalability, Maintainability, Performance**
-- **Modular folder structure**: Separates UI components (`/components`), API logic (`/app/api`), utilities (`/lib`), services (`/services`), and data schemas (`/db/schema`).
-- **Type safety everywhere**: From React props to database queries, TypeScript together with Drizzle and Zod keeps interfaces consistent.
-- **Code splitting & lazy loading**: Next.js automatically splits code per route, and we dynamically import heavy components (e.g., AI panel, rich-text editor).
-- **Database migrations**: Managed by `drizzle-kit`, ensuring reproducible schema changes.
+### Scalability & Maintainability
+- **Modular Structure:** Folders split by feature (`/components`, `/contexts`, `/app/api`) keep code focused and easy to navigate.  
+- **Server Components:** Faster first-load times since data fetching happens on the server, reducing client bundle size.  
+- **Type-Driven Development:** TypeScript and Zod schemas ensure consistent data shapes across UI and API.  
+- **Clear Separation of Concerns:** UI, business logic, data access, and services each have dedicated folders, making it straightforward to extend or refactor.
+
+---
 
 ## 2. Design Principles
 
-**Usability**
-- Clear, intuitive layouts: sidebar + topbar for navigation, consistent buttons and form elements.
-- Immediate feedback: loading spinners, disabled states, toast notifications.
+### Key Principles
+1. **Usability:** Simple, predictable interfaces—users know where they are and how to navigate.  
+2. **Accessibility:** Built-in support for keyboard navigation, ARIA attributes, and color contrast compliance.  
+3. **Responsiveness:** Mobile-first design; layouts adapt seamlessly from phones to large desktops.  
+4. **Consistency:** A shared component library (`shadcn/ui` + Tailwind) ensures uniform look-and-feel.  
 
-**Accessibility**
-- Semantic HTML elements (`<nav>`, `<main>`, `<button>`, etc.).
-- ARIA attributes on custom components (dialogs, modals, menus).
-- Keyboard navigation: focus outlines, skip links, logical tab order.
+### How They’re Applied
+- **Semantic HTML:** Headings, landmarks, and form elements used correctly for screen readers.  
+- **Focus States & Keyboard Support:** Interactive elements clearly indicate focus, and all controls are reachable via keyboard.  
+- **Responsive Utility Classes:** Tailwind breakpoints (`sm`, `md`, `lg`, `xl`) deliver fine control over layouts across devices.  
+- **Accessible Components:** `shadcn/ui` components come with built-in ARIA roles (e.g., modals, dropdowns).
 
-**Responsiveness**
-- Mobile-first breakpoints via Tailwind (`sm`, `md`, `lg`, `xl`).
-- Flexible grid and flex layouts for cards, tables, and boards.
-
-**Consistency**
-- Shared design tokens (colors, spacing, shadows) defined in `tailwind.config.js`.
-- Reusable components from `shadcn/ui` ensure uniform look and behavior.
+---
 
 ## 3. Styling and Theming
 
-**Styling Approach**
-- **Utility-first**: Tailwind CSS for almost all styling—no custom CSS files except for very specific overrides.
-- **Component styles**: Minor custom styles via `className` or `styled` wrappers.
+### Styling Approach
+- **Utility-First CSS:** Tailwind CSS powers all styles. We avoid large custom stylesheets by composing small, reusable utility classes directly in JSX.  
+- **No BEM/SMACSS:** Tailwind’s design encourages component-level styling without complex naming conventions.  
+- **Preprocessor:** Not needed—Tailwind’s JIT compiler handles CSS generation.
 
-**Theming**
-- Light and dark modes out of the box with shadcn/ui.
-- Toggle stored in React Context and persisted in localStorage.
+### Theming
+- **Light & Dark Modes:** Managed by `next-themes`. Tailwind CSS uses CSS variables for colors that swap based on the theme.  
+- **Global Styles:** A minimal `globals.css` file imports Tailwind’s base, components, and utilities, and sets up custom CSS variables.
 
-**Overall Style**
-- **Modern flat design** with subtle glassmorphism touches on cards and panels (semi-transparent backgrounds with a light blur).
+### Visual Style
+- **Modern Flat Design:** Clean edges, minimal shadows, clear typography, and deliberate use of color for emphasis.  
+- **Glassmorphism Elements (Optional):** Subtle frosted-glass backgrounds for modals or overlays by combining backdrop filters and opacity utilities.
 
-**Color Palette**
-- **Primary**: #4F46E5 (indigo-600)
-- **Primary-Highlight**: #6366F1 (indigo-500)
-- **Secondary**: #10B981 (emerald-500)
-- **Accent**: #F59E0B (amber-500)
-- **Neutral Light**: #F3F4F6 (gray-100)
-- **Neutral Dark**: #1F2937 (gray-800)
-- **Background Light**: #FFFFFF
-- **Background Dark**: #111827
-- **Error**: #EF4444 (red-500)
-- **Success**: #22C55E (emerald-400)
+### Color Palette
+| Role            | Light Mode Hex | Dark Mode Hex  | Description                 |
+|-----------------|----------------|----------------|-----------------------------|
+| Primary         | #2563EB        | #3B82F6        | Buttons, links             |
+| Secondary       | #10B981        | #34D399        | Accents, success states    |
+| Accent          | #F59E0B        | #FBBF24        | Warnings, highlights       |
+| Background      | #F9FAFB        | #111827        | Page backgrounds           |
+| Surface         | #FFFFFF        | #1F2937        | Cards, modals              |
+| Neutral         | #6B7280        | #9CA3AF        | Text, borders              |
+| Error           | #EF4444        | #F87171        | Error messages, alerts     |
 
-**Typography**
-- **Font Family**: Inter, system-ui fallback
-- **Base font size**: 16px (leading-6)
-- **Headings**: 600–800 weight for contrast
-- **Body text**: 400–500 weight for readability
+### Typography
+- **Font Family:** Inter (system fallback: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto`)  
+- **Font Sizes:** Tailwind’s scale (`text-sm` through `text-2xl`) for consistency.  
+- **Line Height & Spacing:** Use Tailwind’s `leading-relaxed`, `tracking-wide`, and space utilities for whitespace around text.
+
+---
 
 ## 4. Component Structure
 
-**Organization**
-- `/components/ai`: AI assistant panel, chat bubbles
-- `/components/core`: Layout pieces (Sidebar, Header, Footer)
-- `/components/messaging`: Rich-text composer, message list, typing indicator
-- `/components/projects`: Task cards, Gantt chart, boards
-- `/components/common`: Buttons, inputs, modals, tables
+### Organization
+- `/components` holds reusable pieces grouped by domain:
+  - `ui/`: Wrapped or extended `shadcn/ui` components (Buttons, Inputs, Modals).  
+  - `ai/`: AI chat interfaces, message lists.  
+  - `common/`: Shared layouts or utilities.
 
-**Reusability & Naming**
-- Follow PascalCase for component names (e.g., `MessageList`, `ProjectCard`).
-- Each component folder contains its `index.tsx`, optional `styles.ts`, and tests.
+### Best Practices
+- **Atomic Components:** Start small (Button, Card), then compose into larger patterns (Form, ChatWindow).  
+- **Single Responsibility:** Each component handles one piece of UI or behavior.  
+- **Configurable via Props:** Avoid hard-coded values; expose necessary props for flexibility.  
+- **File Naming:** PascalCase files with same name as exported component.
 
-**Benefits**
-- Clear boundaries: UI logic lives close to markup.
-- Encourages small, focused components that are easier to test.
+### Benefits
+- **Reusability:** One source of truth for shared UI elements reduces duplication.  
+- **Maintainability:** Fix or update in one place; changes propagate throughout the app.
+
+---
 
 ## 5. State Management
 
-**Local State**
-- React's `useState` and `useReducer` for component-specific state (form inputs, toggle states).
+### Approach
+- **React Context API:** Two primary contexts:
+  1. **AuthContext:** Tracks user session, roles, and login/logout methods.  
+  2. **SocketContext:** Manages Socket.IO connection, event listeners, and message dispatching.
+- **Local State Hooks:** `useState` and `useReducer` for form inputs or transient UI states.  
 
-**Global State**
-- **React Context API** for:
-  - **AuthContext**: user info, access tokens, login/logout functions.
-  - **ThemeContext**: current theme, toggle function.
+### Data Flow
+1. **Global data** (user info, socket instance) is stored in context providers at the top level in `/app/layout.tsx`.  
+2. **Components** consume contexts via `useContext()`.  
+3. **Updates** (e.g., new message arrival) trigger context state changes, which rerender relevant components.
 
-**Data Fetching**
-- Next.js **server components** fetch data on the server where possible.
-- **Client components** call our own API routes with `fetch`, handling loading and error states locally.
-- Shared utilities in `/lib/fetcher.ts` to standardize headers and error handling.
+### Why It Works
+- **Avoid Prop Drilling:** Context lets deeply nested components access shared state without passing props through every level.  
+- **Predictable Updates:** State lives in one place, making debugging and tracing easier.
+
+---
 
 ## 6. Routing and Navigation
 
-**Next.js App Router**
-- File-based routing under `/app`:
-  - `/app/layout.tsx`: root layout with header+sidebar.
-  - `/app/(protected)/...`: authenticated routes group.
-  - `/app/admin/...`: ADMIN-only pages.
-  - `/app/sign-in`, `/app/sign-up`, `/app/forgot-password`.
+### Next.js App Router
+- **File-Based Routing:** Pages and nested layouts live in `/app`. A folder named `profile/page.tsx` corresponds to `/profile`.  
+- **Layouts:** Wrap groups of pages (e.g., `/app/(auth)/layout.tsx` for login/register).  
+- **Dynamic Routes:** Bracket syntax (`[id]/page.tsx`) for user profiles or chat rooms.
 
-**Navigating**
-- Use Next.js `<Link>` for client-side transitions.
-- Programmatic navigation with `useRouter`.
+### Navigation
+- **Link Component:** Use Next.js `<Link>` for client-side transitions.  
+- **Active States:** Tailwind classes combined with the `usePathname()` hook to highlight current nav item.  
+- **Protected Routes:** Middleware or server component checks for authentication and redirects unauthorized users.
 
-**Route Protection**
-- Middleware checks for valid JWT and role.
-- Redirect to `/sign-in` if unauthenticated, or show 403 if unauthorized.
+---
 
 ## 7. Performance Optimization
 
-- **Dynamic imports** (`next/dynamic`) for heavy components (TipTap editor, large charts).
-- **Automatic code splitting** by route.
-- **Image optimization** using Next.js `<Image>` component.
-- **Tailwind JIT** ensures unused CSS is purged.
-- **Cache headers and revalidation**: use `revalidate` on data-fetching functions.
+### Key Strategies
+1. **Server Components:** Fetch data on the server to reduce client bundle size.  
+2. **Code Splitting & Lazy Loading:** Dynamic `import()` for large components (e.g., AI chat), Tailwind JIT ensures only used CSS is shipped.  
+3. **Image Optimization:** Next.js `<Image>` for automatic resizing and lazy loading.  
+4. **Asset Caching:** Leveraging HTTP caching headers for static assets and `Cache-Control` on API responses.  
+5. **Memoization:** `React.memo`, `useMemo`, and `useCallback` for expensive computations or frequently re-rendered components.
+
+### Impact on UX
+- Faster first-contentful paint (FCP), lower time to interactive (TTI), and smoother interactions—especially on mobile or slower networks.
+
+---
 
 ## 8. Testing and Quality Assurance
 
-**Unit Tests**
-- **Vitest** (or Jest) for React components and utility functions.
-- Test files colocated in `__tests__` directories or `*.test.tsx` alongside components.
+### Unit Testing
+- **Framework:** Jest with React Testing Library.  
+- **Scope:** Individual functions in `/lib/utils`, small components in `/components/ui`.
 
-**Integration Tests**
-- Test API routes and service layers (`/services`) using in-memory databases or test DB.
+### Integration Testing
+- **Tools:** Jest or Vitest plus `@testing-library/react` for component + context combinations, API route handlers in `/app/api`.
 
-**End-to-End Tests**
-- **Playwright** (or Cypress) for critical user flows:
-  - Signing up and logging in
-  - Sending a message with attachment
-  - Admin creating a user
+### End-to-End (E2E)
+- **Framework:** Cypress or Playwright.  
+- **Flows:** Login, registration, chat messaging, file uploads.
 
-**Linting and Formatting**
-- **ESLint** with TypeScript rules.
-- **Prettier** for consistent code style.
-- **Husky** git hooks to run lint and tests on commits.
+### Automated Checks
+- **Linting:** ESLint with TypeScript plugin, Next.js recommended rules.  
+- **Formatting:** Prettier for consistent code style.  
+- **Accessibility Audits:** `axe-core` or Lighthouse to catch color contrast or ARIA issues.
 
-**Continuous Integration**
-- GitHub Actions pipeline:
-  1. Install dependencies
-  2. Run lint
-  3. Run type-check
-  4. Run unit & integration tests
-  5. Build and export static checks
+---
 
-## 9. Conclusion and Overall Frontend Summary
+## 9. Conclusion and Overall Summary
 
-Our frontend setup uses a modern stack—Next.js 15, React 19, and TypeScript—backed by Tailwind CSS and shadcn/ui for consistent styling. We emphasize type safety from database to UI, follow component-driven development for maintainability, and integrate real-time messaging, AI assistance, and file storage out of the box. By adhering to clear design principles (usability, accessibility, responsiveness), a structured folder layout, and rigorous testing practices, we ensure our codebase can scale with the Enterprise Platform for Operational Performance’s future needs.
+The EPOP Platform Starter’s frontend is built for modern web applications, emphasizing:
+- **Scalability:** Modular code, server components, and type-driven development.  
+- **Maintainability:** Clear folder structure, shared UI library, and consistent styling.  
+- **Performance:** SSR, code splitting, and optimized asset handling.  
+- **User-Centric Design:** Accessibility, responsive layouts, and theming for user comfort.
+
+This guide captures all key decisions—from architecture to testing—ensuring anyone can pick up the codebase, understand its organization, and continue building with confidence.
